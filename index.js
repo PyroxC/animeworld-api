@@ -7,25 +7,34 @@ const app = express();
 // -------- Anime List Endpoint --------
 app.get('/api/anime/list', async (req, res) => {
     try {
-        const response = await axios.get('https://watchanimeworld.in/', {
+        const response = await axios.get('https://watchanimeworld.in/series/', {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
                 'Accept-Language': 'en-US,en;q=0.9'
             }
         });
+
         const $ = cheerio.load(response.data);
         const animeList = [];
 
-        $('div.main_series a').each((i, el) => {
-            const title = $(el).attr('title') || $(el).text().trim();
-            const link = $(el).attr('href');
-            const id = link.split('/').filter(Boolean).pop();
+        // Anime links selector
+        $('a[href^="/series/"]').each((i, el) => {
+            const title = $(el).text().trim();
+            const linkPath = $(el).attr('href').replace(/^\/series\//, '');
             const thumbnail = $(el).find('img').attr('src');
 
-            animeList.push({ id, title, thumbnail, link });
+            if(title && linkPath) {
+                animeList.push({
+                    id: linkPath,
+                    title,
+                    thumbnail,
+                    link: `https://watchanimeworld.in/series/${linkPath}`
+                });
+            }
         });
 
         res.json(animeList);
+
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to fetch anime list' });
