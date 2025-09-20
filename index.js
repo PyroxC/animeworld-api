@@ -32,7 +32,7 @@ app.get('/api/anime/list', async (req, res) => {
     }
 });
 
-// -------- Episode Details Endpoint --------
+// -------- Episode Details Endpoint (Torofilm-style) --------
 app.get('/api/anime/:animeId/:episodeNum', async (req, res) => {
     const { animeId, episodeNum } = req.params;
 
@@ -46,23 +46,32 @@ app.get('/api/anime/:animeId/:episodeNum', async (req, res) => {
         });
 
         const $ = cheerio.load(response.data);
-        const title = $('h1.entry-title').first().text().trim() || `Episode ${episodeNum}`;
-        const embedServers = {};
 
+        const title = $('h1.entry-title').first().text().trim() || `Episode ${episodeNum}`;
+        const description = $('div.entry-content p').first().text().trim() || '';
+        const thumbnail = $('div.post-thumbnail img').attr('src') || '';
+
+        const embedServers = [];
         $('iframe').each((i, el) => {
             const src = $(el).attr('src');
-            const serverName = `server${i+1}`;
-            if(src) embedServers[serverName] = src;
+            if(src) {
+                embedServers.push({
+                    name: `Server ${i+1}`,
+                    url: src
+                });
+            }
         });
 
-        if(Object.keys(embedServers).length === 0) {
+        if(embedServers.length === 0) {
             return res.status(404).json({ error: 'No embed servers found' });
         }
 
         res.json({
             anime_id: animeId,
-            episode: episodeNum,
             title,
+            episode: parseInt(episodeNum),
+            description,
+            thumbnail,
             embed_servers: embedServers
         });
 
