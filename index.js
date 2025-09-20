@@ -33,11 +33,14 @@ app.get('/api/anime/list', async (req, res) => {
 });
 
 // -------- Episode Details Endpoint (Torofilm-style) --------
-app.get('/api/anime/:animeId/:episodeNum', async (req, res) => {
+app.get('/api/anime/:animeId/:season?/:episodeNum', async (req, res) => {
     const { animeId, episodeNum } = req.params;
+    let season = req.params.season || '1'; // Default season 1
 
     try {
-        const url = `https://watchanimeworld.in/series/${animeId}/episode-${episodeNum}`;
+        // Correct episode URL
+        const url = `https://watchanimeworld.in/episode/${animeId}-${season}x${episodeNum}/`;
+
         const response = await axios.get(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -68,8 +71,9 @@ app.get('/api/anime/:animeId/:episodeNum', async (req, res) => {
 
         res.json({
             anime_id: animeId,
-            title,
+            season: parseInt(season),
             episode: parseInt(episodeNum),
+            title,
             description,
             thumbnail,
             embed_servers: embedServers
