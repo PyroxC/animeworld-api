@@ -4,49 +4,22 @@ const cheerio = require('cheerio');
 
 const app = express();
 
-// -------- Anime List Endpoint (Scrape watchanimeworld) --------
-app.get('/api/anime/list', async (req, res) => {
-    try {
-        const response = await axios.get('https://watchanimeworld.in/series/', {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept-Language': 'en-US,en;q=0.9'
-            }
-        });
-
-        const $ = cheerio.load(response.data);
-        const animeList = [];
-
-        $('a[href^="/series/"]').each((i, el) => {
-            const title = $(el).text().trim();
-            const linkPath = $(el).attr('href').replace(/^\/series\//, '');
-            const thumbnail = $(el).find('img').attr('src');
-
-            if (title && linkPath) {
-                animeList.push({
-                    id: linkPath,
-                    title,
-                    thumbnail,
-                    link: `https://watchanimeworld.in/series/${linkPath}`
-                });
-            }
-        });
-
-        res.json(animeList);
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to fetch anime list' });
-    }
-});
-
-// -------- Episode Details (Torofilm-style scrape) --------
-app.get('/api/anime/:animeId/:season/:episodeNum', async (req, res) => {
-    const { animeId, episodeNum } = req.params;
-    let season = req.params.season || '1';
+// -------- TMDB Anime Endpoint --------
+app.get('/api/anime/:tmdbId/:season/:episodeNum', async (req, res) => {
+    const { tmdbId, season, episodeNum } = req.params;
 
     try {
-        const url = `https://watchanimeworld.in/episode/${animeId}-${season}x${episodeNum}/`;
+        // Example: map TMDB ID to anime slug (you’ll need a DB or mapping function)
+        // For demo, let’s assume tmdbId=73223 => naruto-shippuden
+        let animeSlug = '';
+        if (tmdbId === '73223') animeSlug = 'naruto-shippuden';
+        else {
+            return res.status(404).json({ error: 'TMDB ID not mapped yet' });
+        }
+
+        // Construct episode URL
+        const url = `https://watchanimeworld.in/episode/${animeSlug}-${season}x${episodeNum}/`;
+
         const response = await axios.get(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -76,7 +49,8 @@ app.get('/api/anime/:animeId/:season/:episodeNum', async (req, res) => {
         }
 
         res.json({
-            anime_id: animeId,
+            tmdb_id: tmdbId,
+            anime_slug: animeSlug,
             season: parseInt(season),
             episode: parseInt(episodeNum),
             title,
@@ -88,24 +62,6 @@ app.get('/api/anime/:animeId/:season/:episodeNum', async (req, res) => {
     } catch (err) {
         console.error(err.message);
         res.status(500).json({ error: 'Failed to fetch episode details' });
-    }
-});
-
-// -------- Episode Details (TMDB-based flixindia.xyz API) --------
-app.get('/api/tmdb/:tmdbId/:season/:episodeNum', async (req, res) => {
-    const { tmdbId, season, episodeNum } = req.params;
-
-    try {
-        const url = `https://api.flixindia.xyz/anime/${tmdbId}/${season}/${episodeNum}`;
-        const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-
-        res.json(response.data);
-
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Failed to fetch TMDB episode details' });
     }
 });
 
