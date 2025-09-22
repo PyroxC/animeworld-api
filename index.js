@@ -4,7 +4,7 @@ const cheerio = require('cheerio');
 
 const app = express();
 
-// -------- Anime List Endpoint --------
+// -------- Anime List Endpoint (Scrape watchanimeworld) --------
 app.get('/api/anime/list', async (req, res) => {
     try {
         const response = await axios.get('https://watchanimeworld.in/series/', {
@@ -17,13 +17,12 @@ app.get('/api/anime/list', async (req, res) => {
         const $ = cheerio.load(response.data);
         const animeList = [];
 
-        // Anime links selector
         $('a[href^="/series/"]').each((i, el) => {
             const title = $(el).text().trim();
             const linkPath = $(el).attr('href').replace(/^\/series\//, '');
             const thumbnail = $(el).find('img').attr('src');
 
-            if(title && linkPath) {
+            if (title && linkPath) {
                 animeList.push({
                     id: linkPath,
                     title,
@@ -41,15 +40,13 @@ app.get('/api/anime/list', async (req, res) => {
     }
 });
 
-// -------- Episode Details Endpoint (Torofilm-style) --------
-app.get('/api/anime/:animeId/:season?/:episodeNum', async (req, res) => {
+// -------- Episode Details (Torofilm-style scrape) --------
+app.get('/api/anime/:animeId/:season/:episodeNum', async (req, res) => {
     const { animeId, episodeNum } = req.params;
-    let season = req.params.season || '1'; // Default season 1
+    let season = req.params.season || '1';
 
     try {
-        // Correct episode URL
         const url = `https://watchanimeworld.in/episode/${animeId}-${season}x${episodeNum}/`;
-
         const response = await axios.get(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -66,15 +63,15 @@ app.get('/api/anime/:animeId/:season?/:episodeNum', async (req, res) => {
         const embedServers = [];
         $('iframe').each((i, el) => {
             const src = $(el).attr('src');
-            if(src) {
+            if (src) {
                 embedServers.push({
-                    name: `Server ${i+1}`,
+                    name: `Server ${i + 1}`,
                     url: src
                 });
             }
         });
 
-        if(embedServers.length === 0) {
+        if (embedServers.length === 0) {
             return res.status(404).json({ error: 'No embed servers found' });
         }
 
@@ -91,6 +88,24 @@ app.get('/api/anime/:animeId/:season?/:episodeNum', async (req, res) => {
     } catch (err) {
         console.error(err.message);
         res.status(500).json({ error: 'Failed to fetch episode details' });
+    }
+});
+
+// -------- Episode Details (TMDB-based flixindia.xyz API) --------
+app.get('/api/tmdb/:tmdbId/:season/:episodeNum', async (req, res) => {
+    const { tmdbId, season, episodeNum } = req.params;
+
+    try {
+        const url = `https://api.flixindia.xyz/anime/${tmdbId}/${season}/${episodeNum}`;
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+
+        res.json(response.data);
+
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Failed to fetch TMDB episode details' });
     }
 });
 
