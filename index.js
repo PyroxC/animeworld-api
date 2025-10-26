@@ -11,128 +11,174 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Multi-Server Embed API with Server Switching',
-    endpoints: {
-      embed: '/embed/:name/:season/:episode',
-      player: '/player/:name/:season/:episode',
-      example: '/player/naruto-shippuden/1/1'
-    }
-  });
-});
-
-// -------- MULTI-SERVER EMBED API --------
-app.get('/embed/:name/:season/:episodeNum', async (req, res) => {
-  const { name, season, episodeNum } = req.params;
+// -------- TOONSTREAM-STYLE API --------
+app.get('/api/episode/:name/:season/:episode', async (req, res) => {
+  const { name, season, episode } = req.params;
 
   try {
-    // Try to get actual servers from Toonstream or alternative
-    let servers = [];
+    console.log(`Finding servers for: ${name} S${season}E${episode}`);
     
-    try {
-      const alternativeUrl = `https://watchanimeworld.in/episode/${name}-${season}x${episodeNum}/`;
-      const response = await axios.get(alternativeUrl, {
-        timeout: 10000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
+    // Try multiple sources to find embed servers
+    const sources = [
+      {
+        name: 'toonstream',
+        url: `https://toonstream.love/episode/${name}-${season}x${episode}/`
+      },
+      {
+        name: 'animeworld',
+        url: `https://watchanimeworld.in/episode/${name}-${season}x${episode}/`
+      }
+    ];
 
-      const $ = cheerio.load(response.data);
-      
-      // Extract all iframes
-      $('iframe').each((i, el) => {
-        const src = $(el).attr('src');
-        if (src) {
-          servers.push({
-            name: `Server ${i + 1}`,
-            url: src.startsWith('//') ? 'https:' + src : src,
-            type: 'iframe'
+    let foundServers = [];
+
+    for (const source of sources) {
+      try {
+        console.log(`Checking: ${source.url}`);
+        
+        const response = await axios.get(source.url, {
+          timeout: 10000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+
+        const $ = cheerio.load(response.data);
+
+        // Extract episode title
+        const episodeTitle = $('h1.entry-title').text().trim() || 
+                           `${name.replace(/-/g, ' ')} Episode ${episode}`;
+
+        // Extract ALL iframe embeds
+        $('iframe').each((i, el) => {
+          let src = $(el).attr('src');
+          if (src && src.includes('//')) {
+            // Convert to full URL
+            if (src.startsWith('//')) {
+              src = 'https:' + src;
+            }
+            
+            // Only add valid embed URLs
+            if (src.startsWith('https://')) {
+              foundServers.push({
+                name: `Server ${foundServers.length + 1}`,
+                url: src,
+                type: 'embed'
+              });
+            }
+          }
+        });
+
+        // If we found servers, also get episode info
+        if (foundServers.length > 0) {
+          console.log(`✅ Found ${foundServers.length} servers from ${source.name}`);
+          
+          res.json({
+            success: true,
+            episode_info: {
+              anime_name: name,
+              title: episodeTitle,
+              season: parseInt(season),
+              episode: parseInt(episode),
+              source: source.name
+            },
+            servers: foundServers,
+            total_servers: foundServers.length
           });
+          return; // Stop here since we found servers
         }
-      });
-    } catch (scrapeError) {
-      console.log('Scraping failed, using default servers');
+
+      } catch (error) {
+        console.log(`❌ ${source.name} failed:`, error.message);
+        continue;
+      }
     }
 
-    // If no servers found from scraping, use default servers
-    if (servers.length === 0) {
-      servers = [
-        {
-          name: "Zephyr Server",
-          url: "https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406",
-          type: "direct",
-          quality: ["360p", "480p", "720p"]
-        },
-        {
-          name: "Short ICU Server", 
-          url: "https://short.icu/czoaptlRH",
-          type: "iframe",
-          quality: ["480p", "720p"]
-        },
-        {
-          name: "Cloudy Server",
-          url: "https://cloudy.upns.one/#krllwg",
-          type: "iframe", 
-          quality: ["360p", "720p"]
-        }
-      ];
-    }
+    // If no servers found from scraping, use mock servers for demo
+    console.log('Using demo servers');
+    const demoServers = [
+      {
+        name: "Server 1",
+        url: "https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406",
+        type: "embed"
+      },
+      {
+        name: "Server 2",
+        url: "https://short.icu/czoaptlRH",
+        type: "embed"
+      },
+      {
+        name: "Server 3",
+        url: "https://cloudy.upns.one/#krllwg", 
+        type: "embed"
+      }
+    ];
 
     res.json({
       success: true,
-      anime_name: name,
-      season: parseInt(season),
-      episode: parseInt(episodeNum),
-      servers: servers
+      episode_info: {
+        anime_name: name,
+        title: `${name.replace(/-/g, ' ')} Episode ${episode}`,
+        season: parseInt(season),
+        episode: parseInt(episode),
+        source: 'demo'
+      },
+      servers: demoServers,
+      total_servers: demoServers.length
     });
 
   } catch (err) {
-    console.error('Error:', err.message);
+    console.error('API Error:', err.message);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch servers'
+      error: 'Failed to get episode data'
     });
   }
 });
 
-// -------- COMPLETE PLAYER WITH SERVER SWITCHING --------
-app.get('/player/:name/:season/:episodeNum', async (req, res) => {
-  const { name, season, episodeNum } = req.params;
+// -------- TOONSTREAM-STYLE PLAYER PAGE --------
+app.get('/watch/:name/:season/:episode', async (req, res) => {
+  const { name, season, episode } = req.params;
 
-  // Get server data
-  let servers = [];
+  // Get episode data from our API
+  let episodeData = {};
   try {
-    const embedResponse = await axios.get(`http://localhost:${process.env.PORT || 3000}/embed/${name}/${season}/${episodeNum}`);
-    servers = embedResponse.data.servers;
+    const apiResponse = await axios.get(`http://localhost:${process.env.PORT || 3000}/api/episode/${name}/${season}/${episode}`);
+    episodeData = apiResponse.data;
   } catch (error) {
-    // Fallback servers
-    servers = [
-      {
-        name: "Zephyr Server",
-        url: "https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406",
-        type: "direct"
+    episodeData = {
+      success: true,
+      episode_info: {
+        anime_name: name,
+        title: `${name.replace(/-/g, ' ')} Episode ${episode}`,
+        season: parseInt(season),
+        episode: parseInt(episode)
       },
-      {
-        name: "Short ICU Server", 
-        url: "https://short.icu/czoaptlRH",
-        type: "iframe"
-      },
-      {
-        name: "Cloudy Server",
-        url: "https://cloudy.upns.one/#krllwg",
-        type: "iframe"
-      }
-    ];
+      servers: [
+        {
+          name: "Server 1",
+          url: "https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406",
+          type: "embed"
+        },
+        {
+          name: "Server 2",
+          url: "https://short.icu/czoaptlRH", 
+          type: "embed"
+        },
+        {
+          name: "Server 3",
+          url: "https://cloudy.upns.one/#krllwg",
+          type: "embed"
+        }
+      ]
+    };
   }
 
   const html = `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>${name.replace(/-/g, ' ')} - Episode ${episodeNum}</title>
+    <title>${episodeData.episode_info.title}</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -142,47 +188,47 @@ app.get('/player/:name/:season/:episodeNum', async (req, res) => {
             box-sizing: border-box;
         }
         body {
-            background: #0f0f0f;
-            font-family: 'Arial', sans-serif;
-            color: white;
-            line-height: 1.6;
+            background: #0a0a0a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
         }
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
-        .episode-info {
+        .episode-header {
             text-align: center;
             margin-bottom: 20px;
             padding: 20px;
-            background: #1a1a1a;
+            background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
             border-radius: 10px;
+            border: 1px solid #333;
         }
-        .episode-info h1 {
-            font-size: 28px;
+        .episode-header h1 {
+            font-size: 24px;
             margin-bottom: 5px;
             color: #fff;
             text-transform: capitalize;
         }
-        .episode-info .season-episode {
+        .episode-header .meta {
             color: #ccc;
-            font-size: 16px;
+            font-size: 14px;
         }
-        .player-section {
+        .video-container {
             background: #000;
             border-radius: 10px;
             overflow: hidden;
             margin-bottom: 20px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
-        .video-container {
+        .video-wrapper {
             position: relative;
             width: 100%;
-            padding-bottom: 56.25%; /* 16:9 aspect ratio */
-            height: 0;
+            padding-bottom: 56.25%;
+            background: #000;
         }
-        #videoFrame {
+        #videoPlayer {
             position: absolute;
             top: 0;
             left: 0;
@@ -195,123 +241,124 @@ app.get('/player/:name/:season/:episodeNum', async (req, res) => {
             background: #1a1a1a;
             padding: 20px;
             border-radius: 10px;
+            border: 1px solid #333;
         }
         .server-section h3 {
             margin-bottom: 15px;
             color: #fff;
             font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .server-buttons {
+        .server-section h3:before {
+            content: "🔗";
+            font-size: 16px;
+        }
+        .server-list {
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
         }
         .server-btn {
-            padding: 12px 20px;
+            padding: 10px 20px;
             background: #333;
-            color: white;
+            color: #fff;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             transition: all 0.3s ease;
             font-size: 14px;
             font-weight: 500;
+            border: 2px solid transparent;
         }
         .server-btn:hover {
             background: #444;
             transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
         .server-btn.active {
             background: #e50914;
-            box-shadow: 0 2px 10px rgba(229, 9, 20, 0.3);
-        }
-        .server-btn:disabled {
-            background: #555;
-            cursor: not-allowed;
-            opacity: 0.6;
+            border-color: #ff4757;
+            box-shadow: 0 4px 15px rgba(229, 9, 20, 0.3);
         }
         .loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: white;
-            font-size: 18px;
+            color: #fff;
+            font-size: 16px;
             text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 20px 30px;
+            border-radius: 10px;
+            border: 1px solid #333;
         }
-        .error-message {
+        .error {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             color: #e50914;
             text-align: center;
-            font-size: 16px;
-            background: rgba(0,0,0,0.8);
-            padding: 20px;
+            background: rgba(0,0,0,0.9);
+            padding: 30px;
             border-radius: 10px;
-        }
-        .quality-selector {
-            margin-top: 10px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        .quality-btn {
-            padding: 8px 15px;
-            background: #333;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .quality-btn.active {
-            background: #e50914;
+            border: 1px solid #e50914;
         }
         .current-server {
             margin-top: 15px;
-            padding: 10px;
+            padding: 12px;
             background: #2a2a2a;
             border-radius: 6px;
             font-size: 14px;
             color: #ccc;
+            border-left: 4px solid #e50914;
         }
-        .controls {
+        .stats {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-            gap: 10px;
+            gap: 20px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #888;
         }
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
             }
-            .server-buttons {
+            .server-list {
                 justify-content: center;
             }
             .server-btn {
-                padding: 10px 15px;
+                padding: 8px 16px;
                 font-size: 12px;
+            }
+            .episode-header h1 {
+                font-size: 20px;
             }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="episode-info">
-            <h1>${name.replace(/-/g, ' ')}</h1>
-            <div class="season-episode">Season ${season} • Episode ${episodeNum}</div>
+        <div class="episode-header">
+            <h1>${episodeData.episode_info.title}</h1>
+            <div class="meta">
+                Season ${season} • Episode ${episode} • ${episodeData.total_servers} Servers Available
+            </div>
+            <div class="stats">
+                <span>Source: ${episodeData.episode_info.source}</span>
+                <span>Anime: ${episodeData.episode_info.anime_name}</span>
+            </div>
         </div>
         
-        <div class="player-section">
-            <div class="video-container">
-                <div class="loading" id="loading">Loading video player...</div>
-                <div class="error-message" id="errorMessage" style="display: none;"></div>
+        <div class="video-container">
+            <div class="video-wrapper">
+                <div class="loading" id="loading">🎬 Loading video player...</div>
+                <div class="error" id="error" style="display: none;"></div>
                 <iframe 
-                    id="videoFrame"
+                    id="videoPlayer"
                     allowfullscreen
                     webkitallowfullscreen
                     mozallowfullscreen
@@ -321,54 +368,51 @@ app.get('/player/:name/:season/:episodeNum', async (req, res) => {
         </div>
 
         <div class="server-section">
-            <div class="controls">
-                <h3>Available Servers</h3>
-                <div class="current-server" id="currentServer">
-                    Current: Loading...
-                </div>
+            <h3>Available Servers</h3>
+            <div class="server-list" id="serverList">
+                <!-- Server buttons will be added here -->
             </div>
-            
-            <div class="server-buttons" id="serverButtons">
-                <!-- Server buttons will be loaded here -->
+            <div class="current-server" id="currentServer">
+                🔄 Select a server to start playing
             </div>
         </div>
     </div>
 
     <script>
-        // Server data
-        const servers = ${JSON.stringify(servers)};
+        // Episode data from API
+        const episodeData = ${JSON.stringify(episodeData)};
         let currentServerIndex = 0;
 
         // DOM elements
-        const videoFrame = document.getElementById('videoFrame');
-        const serverButtons = document.getElementById('serverButtons');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const serverList = document.getElementById('serverList');
         const loading = document.getElementById('loading');
-        const errorMessage = document.getElementById('errorMessage');
-        const currentServerDisplay = document.getElementById('currentServer');
+        const error = document.getElementById('error');
+        const currentServer = document.getElementById('currentServer');
 
-        // Initialize servers
-        function initializeServers() {
-            serverButtons.innerHTML = '';
+        // Initialize the player
+        function initPlayer() {
+            console.log('Initializing player with', episodeData.servers.length, 'servers');
             
-            servers.forEach((server, index) => {
+            // Create server buttons
+            episodeData.servers.forEach((server, index) => {
                 const button = document.createElement('button');
                 button.className = 'server-btn';
                 button.textContent = server.name;
                 button.onclick = () => switchServer(index);
-                
-                serverButtons.appendChild(button);
+                serverList.appendChild(button);
             });
             
-            // Load first server
-            if (servers.length > 0) {
-                switchServer(0);
+            // Auto-play first server
+            if (episodeData.servers.length > 0) {
+                setTimeout(() => switchServer(0), 1000);
             }
         }
 
-        // Switch server function
+        // Switch to different server
         function switchServer(index) {
-            currentServerIndex = index;
-            const server = servers[index];
+            const server = episodeData.servers[index];
+            console.log('Switching to server:', server.name, server.url);
             
             // Update active button
             document.querySelectorAll('.server-btn').forEach((btn, i) => {
@@ -376,74 +420,55 @@ app.get('/player/:name/:season/:episodeNum', async (req, res) => {
             });
             
             // Update current server display
-            currentServerDisplay.textContent = \`Current: \${server.name}\`;
+            currentServer.innerHTML = \`▶️ Now Playing: <strong>\${server.name}</strong> - \${server.url}\`;
             
             // Show loading
             loading.style.display = 'block';
-            errorMessage.style.display = 'none';
-            videoFrame.style.display = 'none';
+            error.style.display = 'none';
+            videoPlayer.style.display = 'none';
             
-            // Set iframe source
-            videoFrame.src = server.url;
+            // Change iframe source
+            videoPlayer.src = server.url;
             
-            // Handle iframe load
-            videoFrame.onload = () => {
+            // Handle load events
+            videoPlayer.onload = function() {
+                console.log('Server loaded successfully:', server.name);
                 loading.style.display = 'none';
-                videoFrame.style.display = 'block';
+                videoPlayer.style.display = 'block';
+                currentServer.innerHTML = \`✅ Now Playing: <strong>\${server.name}</strong>\`;
             };
             
-            // Handle iframe error
-            videoFrame.onerror = () => {
+            videoPlayer.onerror = function() {
+                console.error('Server failed to load:', server.name);
                 loading.style.display = 'none';
-                errorMessage.style.display = 'block';
-                errorMessage.innerHTML = \`
-                    <strong>Server Error</strong><br>
+                error.style.display = 'block';
+                error.innerHTML = \`
+                    ❌ <strong>Server Error</strong><br>
                     Failed to load \${server.name}<br>
-                    <small>Try another server</small>
+                    <small>Please try another server</small>
                 \`;
+                currentServer.innerHTML = \`❌ Failed: <strong>\${server.name}</strong> - Try another server\`;
             };
+            
+            currentServerIndex = index;
         }
-
-        // Check if server URLs are working
-        function testServerUrls() {
-            servers.forEach((server, index) => {
-                const button = document.querySelectorAll('.server-btn')[index];
-                
-                // Simple test - if URL contains known working domains
-                const workingDomains = ['zephyrflick.top', 'short.icu', 'cloudy.upns.one'];
-                const isLikelyWorking = workingDomains.some(domain => server.url.includes(domain));
-                
-                if (!isLikelyWorking) {
-                    button.style.opacity = '0.7';
-                    button.title = 'This server might not work';
-                }
-            });
-        }
-
-        // Initialize when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeServers();
-            setTimeout(testServerUrls, 1000);
-        });
 
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
-            // Number keys 1-9 to switch servers
+            // Number keys 1-9 for servers
             if (e.key >= '1' && e.key <= '9') {
                 const serverIndex = parseInt(e.key) - 1;
-                if (serverIndex < servers.length) {
+                if (serverIndex < episodeData.servers.length) {
                     switchServer(serverIndex);
                 }
             }
-            
-            // Space bar to play/pause (if video is focused)
-            if (e.code === 'Space') {
-                e.preventDefault();
-                // You can add play/pause logic here if using video tag instead of iframe
-            }
         });
 
-        console.log('Available servers:', servers);
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initPlayer);
+
+        // Log available servers for debugging
+        console.log('Available servers:', episodeData.servers);
     </script>
 </body>
 </html>
@@ -452,23 +477,31 @@ app.get('/player/:name/:season/:episodeNum', async (req, res) => {
   res.send(html);
 });
 
-// -------- SIMPLE EMBED REDIRECT --------
-app.get('/embed-direct/:name/:season/:episodeNum/:serverIndex?', async (req, res) => {
-  const { name, season, episodeNum, serverIndex = 0 } = req.params;
+// -------- DIRECT EMBED (For iframe use) --------
+app.get('/embed/:name/:season/:episode/:serverIndex?', async (req, res) => {
+  const { name, season, episode, serverIndex = 0 } = req.params;
 
   try {
-    // Get server data
-    const embedResponse = await axios.get(`http://localhost:${process.env.PORT || 3000}/embed/${name}/${season}/${episodeNum}`);
-    const servers = embedResponse.data.servers;
-    
+    const apiResponse = await axios.get(`http://localhost:${process.env.PORT || 3000}/api/episode/${name}/${season}/${episode}`);
+    const servers = apiResponse.data.servers;
     const selectedServer = servers[parseInt(serverIndex)] || servers[0];
-    
-    // Redirect to the embed URL
-    res.redirect(selectedServer.url);
+
+    res.json({
+      embed_url: selectedServer.url,
+      server_name: selectedServer.name,
+      anime: name,
+      season: season,
+      episode: episode
+    });
 
   } catch (error) {
-    // Fallback to Zephyr server
-    res.redirect("https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406");
+    res.json({
+      embed_url: "https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406",
+      server_name: "Default Server",
+      anime: name,
+      season: season,
+      episode: episode
+    });
   }
 });
 
@@ -476,10 +509,11 @@ const PORT = process.env.PORT || 3000;
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`🎮 Multi-Server Player running on port ${PORT}`);
+    console.log(`🎬 ToonStream-Style API running on port ${PORT}`);
     console.log(`📍 Local: http://localhost:${PORT}`);
-    console.log(`🎯 Player: http://localhost:${PORT}/player/naruto-shippuden/1/1`);
-    console.log(`🔗 Embed API: http://localhost:${PORT}/embed/naruto-shippuden/1/1`);
+    console.log(`🎯 Watch Page: http://localhost:${PORT}/watch/naruto-shippuden/1/1`);
+    console.log(`🔗 API: http://localhost:${PORT}/api/episode/naruto-shippuden/1/1`);
+    console.log(`📺 Embed: http://localhost:${PORT}/embed/naruto-shippuden/1/1`);
   });
 }
 
