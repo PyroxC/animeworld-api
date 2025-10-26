@@ -1,7 +1,4 @@
 const express = require('express');
-const axios = require('axios');
-const cheerio = require('cheerio');
-
 const app = express();
 
 // Enable CORS
@@ -11,100 +8,76 @@ app.use((req, res, next) => {
   next();
 });
 
-// Your target domains for embed search
-const TARGET_DOMAINS = [
-  'play.zephyrflick.top',
-  'short.icu', 
-  'cloudy.upns.one'
-];
-
-// -------- ORIGINAL API STRUCTURE (YOUR STYLE) --------
-app.get('/api/anime/:name/:season/:episode', async (req, res) => {
-  const { name, season, episode } = req.params;
-
-  try {
-    console.log(`🔍 Finding embeds for: ${name} S${season}E${episode}`);
-    
-    // Try Toonstream first to find embed links
-    const toonstreamUrl = `https://toonstream.love/episode/${name}-${season}x${episode}/`;
-    
-    let foundServers = [];
-
-    try {
-      const response = await axios.get(toonstreamUrl, {
-        timeout: 10000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      const $ = cheerio.load(response.data);
-
-      // Extract episode title
-      const episodeTitle = $('h1.entry-title').text().trim() || `${name.replace(/-/g, ' ')} Episode ${episode}`;
-
-      // Find ALL iframes and check if they match our target domains
-      $('iframe').each((index, element) => {
-        const iframe = $(element);
-        const src = iframe.attr('src');
-        const dataSrc = iframe.attr('data-src');
-        
-        const embedUrl = dataSrc || src;
-        
-        if (embedUrl) {
-          // Check if this embed URL matches any of our target domains
-          const matchedDomain = TARGET_DOMAINS.find(domain => 
-            embedUrl.includes(domain)
-          );
-
-          if (matchedDomain) {
-            console.log(`✅ Found embed from ${matchedDomain}`);
-            
-            let finalUrl = embedUrl;
-            if (embedUrl.startsWith('//')) {
-              finalUrl = 'https:' + embedUrl;
-            }
-
-            foundServers.push({
-              name: `Server ${foundServers.length + 1}`,
-              url: finalUrl,
-              type: 'iframe',
-              domain: matchedDomain
-            });
-          }
-        }
-      });
-
-    } catch (toonstreamError) {
-      console.log('Toonstream failed, using direct servers');
-    }
-
-    // If no servers found from scraping, use direct server URLs
-    if (foundServers.length === 0) {
-      console.log('Using direct server URLs');
-      foundServers = [
+// তোমার manually added embed URLs - এখানে তুমি যেকোনো এম্বেড URL add করবে
+const MANUAL_EMBEDS = {
+  'naruto-shippuden': {
+    '1': {
+      '1': [
         {
           name: "Zephyr Server",
           url: "https://play.zephyrflick.top/video/49182f81e6a13cf5eaa496d51fea6406",
-          type: "direct",
-          domain: "play.zephyrflick.top"
+          type: "embed"
         },
         {
           name: "Short ICU Server", 
           url: "https://short.icu/czoaptlRH",
-          type: "direct",
-          domain: "short.icu"
+          type: "embed"
         },
         {
           name: "Cloudy Server",
           url: "https://cloudy.upns.one/#krllwg",
-          type: "direct",
-          domain: "cloudy.upns.one"
+          type: "embed"
         }
-      ];
+      ],
+      '2': [
+        {
+          name: "Zephyr Server",
+          url: "https://play.zephyrflick.top/video/another-episode-id",
+          type: "embed"
+        },
+        {
+          name: "Short ICU Server",
+          url: "https://short.icu/another-code",
+          type: "embed"
+        }
+      ]
+    }
+  },
+  'one-piece': {
+    '1': {
+      '1': [
+        {
+          name: "Zephyr Server",
+          url: "https://play.zephyrflick.top/video/one-piece-ep1",
+          type: "embed"
+        },
+        {
+          name: "Cloudy Server",
+          url: "https://cloudy.upns.one/one-piece-1",
+          type: "embed"
+        }
+      ]
+    }
+  }
+};
+
+// -------- SIMPLE API - তোমার দেওয়া এম্বেডগুলো return করবে --------
+app.get('/api/anime/:name/:season/:episode', (req, res) => {
+  const { name, season, episode } = req.params;
+
+  try {
+    // তোমার manually added embeds থেকে data নাও
+    const servers = MANUAL_EMBEDS[name]?.[season]?.[episode];
+
+    if (!servers || servers.length === 0) {
+      return res.json({
+        success: false,
+        error: 'No servers found for this episode',
+        note: 'Add embed URLs manually in the MANUAL_EMBEDS object'
+      });
     }
 
-    // Simple response - just like your original
+    // Simple response - exactly like you want
     res.json({
       success: true,
       data: {
@@ -112,8 +85,8 @@ app.get('/api/anime/:name/:season/:episode', async (req, res) => {
         season: parseInt(season),
         episode: parseInt(episode),
         title: `${name.replace(/-/g, ' ')} Episode ${episode}`,
-        servers: foundServers,
-        total_servers: foundServers.length
+        servers: servers,
+        total_servers: servers.length
       }
     });
 
@@ -121,12 +94,44 @@ app.get('/api/anime/:name/:season/:episode', async (req, res) => {
     console.error('Error:', err.message);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch episode'
+      error: 'Server error'
     });
   }
 });
 
-// -------- SIMPLE PLAYER (Like your original) --------
+// -------- ADD NEW EMBED URL (তুমি নতুন এম্বেড add করতে পারবে) --------
+app.get('/api/add-embed/:name/:season/:episode', (req, res) => {
+  const { name, season, episode } = req.params;
+  const { url, server_name = "Custom Server" } = req.query;
+
+  if (!url) {
+    return res.json({
+      success: false,
+      error: 'Missing embed URL'
+    });
+  }
+
+  // Initialize if not exists
+  if (!MANUAL_EMBEDS[name]) MANUAL_EMBEDS[name] = {};
+  if (!MANUAL_EMBEDS[name][season]) MANUAL_EMBEDS[name][season] = {};
+  if (!MANUAL_EMBEDS[name][season][episode]) MANUAL_EMBEDS[name][season][episode] = [];
+
+  // Add new embed
+  MANUAL_EMBEDS[name][season][episode].push({
+    name: server_name,
+    url: url,
+    type: "embed",
+    added_at: new Date().toISOString()
+  });
+
+  res.json({
+    success: true,
+    message: 'Embed URL added successfully',
+    total_servers: MANUAL_EMBEDS[name][season][episode].length
+  });
+});
+
+// -------- SIMPLE PLAYER --------
 app.get('/player/:name/:season/:episode', (req, res) => {
   const { name, season, episode } = req.params;
   
@@ -149,6 +154,9 @@ app.get('/player/:name/:season/:episode', (req, res) => {
         .server-btn.active { background: #e50914; }
         .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; }
         .episode-info { text-align: center; margin-bottom: 15px; color: #ccc; }
+        .add-server { margin-top: 10px; padding: 10px; background: #1a1a1a; border-radius: 4px; }
+        .add-server input { padding: 5px; margin: 5px; width: 200px; }
+        .add-server button { padding: 5px 10px; background: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -172,10 +180,17 @@ app.get('/player/:name/:season/:episode', (req, res) => {
         <div class="server-buttons" id="serverButtons">
             <!-- Server buttons will be added here -->
         </div>
+
+        <div class="add-server">
+            <h4>Add New Server Manually</h4>
+            <input type="text" id="newServerUrl" placeholder="Paste embed URL here">
+            <input type="text" id="newServerName" placeholder="Server name (optional)">
+            <button onclick="addNewServer()">Add Server</button>
+        </div>
     </div>
 
     <script>
-        // Get data from API
+        // Load episode data
         async function loadEpisode() {
             try {
                 const response = await fetch('/api/anime/${name}/${season}/${episode}');
@@ -183,6 +198,8 @@ app.get('/player/:name/:season/:episode', (req, res) => {
                 
                 if (data.success) {
                     initPlayer(data.data.servers);
+                } else {
+                    document.getElementById('serverButtons').innerHTML = '<p style="color: red;">No servers found. Add servers manually.</p>';
                 }
             } catch (error) {
                 console.error('Failed to load episode:', error);
@@ -193,6 +210,9 @@ app.get('/player/:name/:season/:episode', (req, res) => {
             const serverButtons = document.getElementById('serverButtons');
             const videoPlayer = document.getElementById('videoPlayer');
             const loading = document.getElementById('loading');
+            
+            // Clear previous buttons
+            serverButtons.innerHTML = '';
             
             // Create server buttons
             servers.forEach((server, index) => {
@@ -227,6 +247,39 @@ app.get('/player/:name/:season/:episode', (req, res) => {
                 document.getElementById('loading').style.display = 'none';
                 videoPlayer.style.display = 'block';
             };
+
+            videoPlayer.onerror = function() {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('loading').textContent = 'Server failed to load';
+            };
+        }
+
+        // Add new server manually
+        async function addNewServer() {
+            const url = document.getElementById('newServerUrl').value;
+            const name = document.getElementById('newServerName').value || 'Custom Server';
+            
+            if (!url) {
+                alert('Please enter embed URL');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/add-embed/${name}/${season}/${episode}?url=' + encodeURIComponent(url) + '&server_name=' + encodeURIComponent(name));
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Server added successfully!');
+                    document.getElementById('newServerUrl').value = '';
+                    document.getElementById('newServerName').value = '';
+                    // Reload the episode to show new server
+                    loadEpisode();
+                } else {
+                    alert('Error adding server: ' + data.error);
+                }
+            } catch (error) {
+                alert('Failed to add server');
+            }
         }
 
         // Load episode when page opens
@@ -239,16 +292,26 @@ app.get('/player/:name/:season/:episode', (req, res) => {
   res.send(html);
 });
 
+// -------- GET ALL EMBEDS (তুমি哪些 এম্বেড add করেছো দেখতে পারবে) --------
+app.get('/api/all-embeds', (req, res) => {
+  res.json({
+    success: true,
+    data: MANUAL_EMBEDS
+  });
+});
+
 // -------- HEALTH CHECK --------
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Simple Anime API - Original Structure',
+    message: 'Manual Embed URL API - তুমি নিজে এম্বেড URL add করবে',
     endpoints: {
       api: '/api/anime/:name/:season/:episode',
       player: '/player/:name/:season/:episode',
+      add_embed: '/api/add-embed/:name/:season/:episode?url=EMBED_URL&server_name=NAME',
+      all_embeds: '/api/all-embeds',
       example: '/api/anime/naruto-shippuden/1/1'
     },
-    target_domains: TARGET_DOMAINS
+    instructions: 'তুমি manually embed URLs add করবে MANUAL_EMBEDS object এ, অথবা /api/add-embed endpoint use করে'
   });
 });
 
@@ -256,11 +319,11 @@ const PORT = process.env.PORT || 3000;
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`🎯 Simple Anime API running on port ${PORT}`);
+    console.log(`🎯 Manual Embed API running on port ${PORT}`);
     console.log(`📍 Local: http://localhost:${PORT}`);
     console.log(`🔗 API: http://localhost:${PORT}/api/anime/naruto-shippuden/1/1`);
     console.log(`🎮 Player: http://localhost:${PORT}/player/naruto-shippuden/1/1`);
-    console.log(`🎯 Target Domains: ${TARGET_DOMAINS.join(', ')}`);
+    console.log(`📝 Add Embed: http://localhost:${PORT}/api/add-embed/naruto-shippuden/1/1?url=YOUR_EMBED_URL`);
   });
 }
 
